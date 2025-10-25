@@ -3,8 +3,9 @@ import RealityKit
 
 struct ImmersiveView: View {
     @Environment(AppModel.self) private var appModel
-    @State private var cubeCenter: Float = 0.5   
-    @State private var cubeSize: Float = 0.5      
+    @State private var cubeCenter: Float = 0.5    
+    @State private var cubeSize: Float = 0.5   
+    @State private var cubeWidthFactor: Float = 1.0 
     
     let modelWorldPosition: SIMD3<Float> = [0, 0.3, -0.2]
     let modelWorldScale: SIMD3<Float> = [0.01, 0.01, 0.01]
@@ -63,7 +64,7 @@ struct ImmersiveView: View {
              content.add(directionalLight)
 
             let occlusionMat = OcclusionMaterial()
-            let cubeWidthWorld = max((localWidth * modelWorldScale.x) * cubeSize, occluderWidthFallback * 0.01)
+            let cubeWidthWorld = max((localWidth * modelWorldScale.x) * cubeSize * cubeWidthFactor, occluderWidthFallback * 0.01)
             let cubeDepthWorld = max((localDepth * modelWorldScale.z) * cubeSize, occluderDepthFallback * 0.01)
             let cubeHeightWorld = max(modelHeightWorld * cubeSize, occluderThickness)
 
@@ -80,7 +81,7 @@ struct ImmersiveView: View {
                 return
             }
             let modelBaseWorldY = modelWorldPosition.y + (modelLocalMinY * modelWorldScale.y)
-            let cubeWidthWorld = max((modelLocalWidth * modelWorldScale.x) * cubeSize, occluderWidthFallback * 0.01)
+            let cubeWidthWorld = max((modelLocalWidth * modelWorldScale.x) * cubeSize * cubeWidthFactor, occluderWidthFallback * 0.01)
             let cubeDepthWorld = max((modelLocalDepth * modelWorldScale.z) * cubeSize, occluderDepthFallback * 0.01)
             let cubeHeightWorld = max(modelHeightWorld * cubeSize, occluderThickness)
 
@@ -117,6 +118,16 @@ struct ImmersiveView: View {
                      } minimumValueLabel: { Text("1%") } maximumValueLabel: { Text("100%") }
                      .frame(width: 400)
                      Text("Size: \(cubeSize * 100, specifier: "%.0f")% of model height")
+                         .padding(8)
+                         .monospaced()
+                 }
+
+                 VStack {
+                     Slider(value: $cubeWidthFactor, in: 0.1...2.0, step: 0.01) {
+                         Text("Cube Width Factor")
+                     } minimumValueLabel: { Text("10%") } maximumValueLabel: { Text("200%") }
+                     .frame(width: 400)
+                     Text("Width Factor: \(cubeWidthFactor * 100, specifier: "%.0f")%")
                          .padding(8)
                          .monospaced()
                  }
