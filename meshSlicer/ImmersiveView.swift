@@ -18,7 +18,8 @@ struct ImmersiveView: View {
 
     @State private var leftPlaneOffset: Float = 0.25
     @State private var rightPlaneOffset: Float = 0.75
-
+    @State private var leftPlaneYPosition: Float = 0.0
+    @State private var rightPlaneYPosition: Float = 0.0
     let occluderThickness: Float = 0.002
     let occluderZ: Float = -0.2
     let cubeOccluderName = "SliceCubeOccluder"
@@ -73,22 +74,25 @@ struct ImmersiveView: View {
 
             let planeThickness: Float = max(occluderThickness, 0.001)
             let planeHeight = max(localHeightWorld, 0.001)
-            let planeDepth = max(localDepthWorld * 1.05, 0.001) // 5% buffer
-            let planeVisualHeight = planeHeight * 1.2 // Make planes slightly taller
-            let planeVisualDepth = planeDepth * 1.2   // and deeper visually
+            let planeDepth = max(localDepthWorld * 1.05, 0.001) 
+            let planeVisualHeight = planeHeight * 1.2 
+            let planeVisualDepth = planeDepth * 1.2   
+
+            DispatchQueue.main.async {
+                leftPlaneYPosition = modelBaseWorldY + (planeVisualHeight / 2.0)
+                rightPlaneYPosition = modelBaseWorldY + (planeVisualHeight / 2.0)
+            }
 
             let leftPlane = ModelEntity(
                 mesh: .generateBox(size: [planeThickness, planeVisualHeight, planeVisualDepth]),
                 materials: [SimpleMaterial(color: .blue.withAlphaComponent(0.5), isMetallic: false)]
             )
             leftPlane.name = "LeftPlane"
-            // Position bottom of plane at bottom of model
             leftPlane.position = [
                 modelBaseWorldX + (leftPlaneOffset * localWidthWorld),
-                modelBaseWorldY + (planeVisualHeight / 2.0),
+                leftPlaneYPosition,
                 occluderZ
             ]
-            // Use precise collision shape
             leftPlane.components.set(CollisionComponent(shapes: [.generateBox(width: planeThickness, height: planeHeight, depth: planeDepth)]))
             leftPlane.components.set(InputTargetComponent())
             content.add(leftPlane)
@@ -98,21 +102,18 @@ struct ImmersiveView: View {
                 materials: [SimpleMaterial(color: .red.withAlphaComponent(0.5), isMetallic: false)]
             )
             rightPlane.name = "RightPlane"
-            // Position bottom of plane at bottom of model
             rightPlane.position = [
                 modelBaseWorldX + (rightPlaneOffset * localWidthWorld),
-                modelBaseWorldY + (planeVisualHeight / 2.0),
+                rightPlaneYPosition,
                 occluderZ
             ]
-            // Use precise collision shape
             rightPlane.components.set(CollisionComponent(shapes: [.generateBox(width: planeThickness, height: planeHeight, depth: planeDepth)]))
             rightPlane.components.set(InputTargetComponent())
             content.add(rightPlane)
 
-            // --- 7. Create Initial Occluder Cube ---
             let cubeInitWidth = max(localWidthWorld * (rightPlaneOffset - leftPlaneOffset), 0.01)
             let cubeInitHeight = max(localHeightWorld, 0.01)
-            let cubeInitDepth = max(localDepthWorld * 1.05, 0.01) // 5% buffer
+            let cubeInitDepth = max(localDepthWorld * 1.05, 0.01) 
             
             let followingCube = ModelEntity(
                 mesh: .generateBox(size: [cubeInitWidth, cubeInitHeight, cubeInitDepth]),
@@ -127,49 +128,41 @@ struct ImmersiveView: View {
             content.add(followingCube)
 
         } update: { content in
-            // --- 1. Guard for Entities ---
             guard let leftPlane = content.entities.first(where: { $0.name == "LeftPlane" }) as? ModelEntity,
                   let rightPlane = content.entities.first(where: { $0.name == "RightPlane" }) as? ModelEntity,
                   let followingCube = content.entities.first(where: { $0.name == "FollowingCube" }) as? ModelEntity else {
                 return
             }
 
-            // --- 2. Guard for Async State ---
-            // Prevent updates until model dimensions are loaded
             guard modelLocalWidth > 0, modelHeightWorld > 0, modelLocalDepth > 0 else {
                 return
             }
 
-            // --- 3. Recalculate World Coords from State ---
             let modelBaseWorldX = modelWorldPosition.x + (modelLocalMinX * modelWorldScale.x)
             let modelWidthWorld = modelLocalWidth * modelWorldScale.x
             let modelBaseWorldY = modelWorldPosition.y + (modelLocalMinY * modelWorldScale.y)
             let modelWorldHeight = modelHeightWorld
             let modelWorldDepth = modelLocalDepth * modelWorldScale.z
 
-            // --- 4. Update Slicer Plane Positions (Driven by State) ---
-            // Get Y-position from the plane itself, as it's constant
             leftPlane.transform.translation.x = modelBaseWorldX + (leftPlaneOffset * modelWidthWorld)
+            leftPlane.transform.translation.y = leftPlaneYPosition
             rightPlane.transform.translation.x = modelBaseWorldX + (rightPlaneOffset * modelWidthWorld)
+            rightPlane.transform.translation.y = rightPlaneYPosition
 
-            // --- 5. Update Occluder Cube Position and Scale ---
             let cubeMinX = min(leftPlane.transform.translation.x, rightPlane.transform.translation.x)
             let cubeMaxX = max(leftPlane.transform.translation.x, rightPlane.transform.translation.x)
             let cubeWidth = max(0.001, cubeMaxX - cubeMinX)
             let cubeCenterX = cubeMinX + (cubeWidth / 2.0)
 
-            // Use consistent height/depth
             let cubeHeight = max(0.001, modelWorldHeight)
-            let cubeDepth = max(0.001, modelWorldDepth * 1.05) // 5% buffer
+            let cubeDepth = max(0.001, modelWorldDepth * 1.05) 
 
-            // **FIX:** Use modelBaseWorldY for correct vertical alignment
             followingCube.transform.translation = SIMD3<Float>(
                 cubeCenterX,
                 modelBaseWorldY + (cubeHeight / 2.0),
                 occluderZ
             )
             
-            // Update the mesh itself
             followingCube.model?.mesh = .generateBox(size: [cubeWidth, cubeHeight, cubeDepth])
             
         }
@@ -180,51 +173,56 @@ struct ImmersiveView: View {
                     let entity = value.entity
                     let translation = value.translation3D
                     let deltaX = Float(translation.x)
+                    let deltaY = Float(translation.y)
 
-                    // --- Guard for Async State ---
                     let modelWidthWorld = modelLocalWidth * modelWorldScale.x
-                    guard modelWidthWorld > 0 else {
-                        // Don't allow dragging until model width is calculated
+                    let modelHeightWorld = modelHeightWorld 
+                    guard modelWidthWorld > 0, modelHeightWorld > 0 else {
                         return
                     }
 
-                    // --- Get World Coords ---
                     let modelBaseWorldX = modelWorldPosition.x + (modelLocalMinX * modelWorldScale.x)
                     let currentLeftPlaneX = modelBaseWorldX + (leftPlaneOffset * modelWidthWorld)
                     let currentRightPlaneX = modelBaseWorldX + (rightPlaneOffset * modelWidthWorld)
 
-                    // --- Update State Offsets Based on Drag ---
+                    let modelBaseWorldY = modelWorldPosition.y + (modelLocalMinY * modelWorldScale.y)
+                    let planeVisualHeight = (modelLocalMaxY - modelLocalMinY) * modelWorldScale.y * 1.2
+
+                    let minYClamp = modelBaseWorldY + (planeVisualHeight / 2.0)
+                    let maxYClamp = modelBaseWorldY + modelHeightWorld - (planeVisualHeight / 2.0)
+
                     if entity.name == "LeftPlane" {
                         var newLeftPlaneX = currentLeftPlaneX + deltaX
-                        // Clamp position: [modelBase] ... [rightPlane - thickness]
                         let minLeftX = modelBaseWorldX
                         let maxLeftX = currentRightPlaneX - occluderThickness
                         newLeftPlaneX = max(min(newLeftPlaneX, maxLeftX), minLeftX)
-                        
-                        // Convert back to relative offset
                         leftPlaneOffset = (newLeftPlaneX - modelBaseWorldX) / modelWidthWorld
+
+                        var newLeftPlaneY = leftPlaneYPosition + deltaY
+                        newLeftPlaneY = max(min(newLeftPlaneY, maxYClamp), minYClamp)
+                        leftPlaneYPosition = newLeftPlaneY
                         
                     } else if entity.name == "RightPlane" {
                         var newRightPlaneX = currentRightPlaneX + deltaX
-                        // Clamp position: [leftPlane + thickness] ... [modelBase + modelWidth]
                         let minRightX = currentLeftPlaneX + occluderThickness
                         let maxRightX = modelBaseWorldX + modelWidthWorld
                         newRightPlaneX = max(min(newRightPlaneX, maxRightX), minRightX)
-                        
-                        // Convert back to relative offset
                         rightPlaneOffset = (newRightPlaneX - modelBaseWorldX) / modelWidthWorld
+
+                        var newRightPlaneY = rightPlaneYPosition + deltaY
+                        newRightPlaneY = max(min(newRightPlaneY, maxYClamp), minYClamp)
+                        rightPlaneYPosition = newRightPlaneY
                     }
                 }
         )
         .overlay(alignment: .bottom) {
-            // Your UI overlay
             VStack {
                 ToggleImmersiveSpaceButton()
             }
             .padding(24)
             .background(.black.opacity(0.5))
             .cornerRadius(16)
-            .offset(z: -0.5) // Push UI back slightly
+            .offset(z: -0.5) 
         }
     }
 }
