@@ -3,196 +3,130 @@ import RealityKit
 
 struct ImmersiveView: View {
     @Environment(AppModel.self) private var appModel
-    @State private var sliceHeightBottom: Float = 0.001 
-    @State private var sliceHeightTop: Float = 0.999    
+    @State private var cubeCenter: Float = 0.5   
+    @State private var cubeSize: Float = 0.5      
     
     let modelWorldPosition: SIMD3<Float> = [0, 0.3, -0.2]
     let modelWorldScale: SIMD3<Float> = [0.01, 0.01, 0.01]
     @State private var modelHeightWorld: Float = 0.001 
     @State private var modelLocalMinY: Float = 0.0 
+    @State private var modelLocalWidth: Float = 0.0
+    @State private var modelLocalDepth: Float = 0.0
 
     let occluderThickness: Float = 0.002 
-    let occluderWidth: Float = 100.0 
-    let occluderDepth: Float = 100.0 
-    var occluderHalfThickness: Float { occluderThickness / 2.0 }
+    let occluderWidthFallback: Float = 100.0 
+    let occluderDepthFallback: Float = 100.0 
+     var occluderHalfThickness: Float { occluderThickness / 2.0 }
     
-    let occluderZ: Float = -0.2 
+     let occluderZ: Float = -0.2 
 
-    let bottomOccluderName = "BottomSliceOccluder"
-    let topOccluderName = "TopSliceOccluder"
-    // Invisible occlusion masks to hide regions outside the slice bounds
-    let bottomMaskName = "BottomMaskOccluder"
-    let topMaskName = "TopMaskOccluder"
+    let cubeOccluderName = "SliceCubeOccluder"
 
-    var body: some View {
-        RealityView { content in
-            guard let model = try? await Entity(named: modelName) else {
-                print("Error: Could not load model '\(modelName)'.")
-                let placeholder = ModelEntity(
-                    mesh: .generateBox(size: 0.1),
-                    materials: [SimpleMaterial(color: .red, isMetallic: false)]
-                )
-                placeholder.position = modelWorldPosition
-                placeholder.name = "Error: Model Not Found"
-                content.add(placeholder)
-                return
-            }
-            model.position = modelWorldPosition
-            model.scale = modelWorldScale
-            model.name = "SlicableModel"
-            content.add(model)
+     var body: some View {
+         RealityView { content in
+             guard let model = try? await Entity(named: modelName) else {
+                 print("Error: Could not load model '\(modelName)'.")
+                 let placeholder = ModelEntity(
+                     mesh: .generateBox(size: 0.1),
+                     materials: [SimpleMaterial(color: .red, isMetallic: false)]
+                 )
+                 placeholder.position = modelWorldPosition
+                 placeholder.name = "Error: Model Not Found"
+                 content.add(placeholder)
+                 return
+             }
+             model.position = modelWorldPosition
+             model.scale = modelWorldScale
+             model.name = "SlicableModel"
+             content.add(model)
 
-            let localBounds = model.visualBounds(relativeTo: model) 
-            let localMinY = localBounds.min.y
-            let localMaxY = localBounds.max.y
-            let localHeight = localMaxY - localMinY
-            DispatchQueue.main.async {
+             let localBounds = model.visualBounds(relativeTo: model) 
+             let localMinY = localBounds.min.y
+             let localMaxY = localBounds.max.y
+             let localHeight = localMaxY - localMinY
+            let localWidth = localBounds.max.x - localBounds.min.x
+            let localDepth = localBounds.max.z - localBounds.min.z
+             DispatchQueue.main.async {
                 modelLocalMinY = localMinY
                 modelHeightWorld = localHeight * modelWorldScale.y
+                modelLocalWidth = localWidth
+                modelLocalDepth = localDepth
             }
 
-            let modelBaseWorldY = modelWorldPosition.y + (localMinY * modelWorldScale.y)
+             let modelBaseWorldY = modelWorldPosition.y + (localMinY * modelWorldScale.y)
 
-            let directionalLight = DirectionalLight()
-            directionalLight.light.color = .white
-            directionalLight.light.intensity = 10000
-            directionalLight.shadow = DirectionalLightComponent.Shadow()
-            directionalLight.orientation = simd_quatf(angle: .pi / 4, axis: [1, 1, 0])
-            content.add(directionalLight)
+             let directionalLight = DirectionalLight()
+             directionalLight.light.color = .white
+             directionalLight.light.intensity = 10000
+             directionalLight.shadow = DirectionalLightComponent.Shadow()
+             directionalLight.orientation = simd_quatf(angle: .pi / 4, axis: [1, 1, 0])
+             content.add(directionalLight)
 
-            let bottomSlicerMaterial = SimpleMaterial(color: .blue, isMetallic: false)
-            let topSlicerMaterial = SimpleMaterial(color: .green, isMetallic: false)
-            
-            let bottomOccluder = ModelEntity(
-                mesh: .generateBox(size: [occluderWidth, occluderThickness, occluderDepth]),
-                materials: [bottomSlicerMaterial]
-            )
-            bottomOccluder.name = bottomOccluderName
-            
-            let initialBottomOccluderCenterY = modelBaseWorldY + (sliceHeightBottom * modelHeightWorld)
-            bottomOccluder.position = [modelWorldPosition.x, initialBottomOccluderCenterY, occluderZ]
-            content.add(bottomOccluder)
-
-            let topOccluder = ModelEntity(
-                mesh: .generateBox(size: [occluderWidth, occluderThickness, occluderDepth]),
-                materials: [topSlicerMaterial]
-            )
-            topOccluder.name = topOccluderName
-            
-            let initialTopOccluderCenterY = modelBaseWorldY + (sliceHeightTop * modelHeightWorld)
-            topOccluder.position = [modelWorldPosition.x, initialTopOccluderCenterY, occluderZ]
-            content.add(topOccluder)
-
-            // --- Invisible occlusion masks ---
-            // Use a unit-height box and scale it in Y to the desired mask height so we can update easily later.
             let occlusionMat = OcclusionMaterial()
+            let cubeWidthWorld = max((localWidth * modelWorldScale.x) * cubeSize, occluderWidthFallback * 0.01)
+            let cubeDepthWorld = max((localDepth * modelWorldScale.z) * cubeSize, occluderDepthFallback * 0.01)
+            let cubeHeightWorld = max(modelHeightWorld * cubeSize, occluderThickness)
 
-            // Bottom mask: hides everything from model bottom up to (but not including) the bottom slice plane
-            let bottomMask = ModelEntity(
-                mesh: .generateBox(size: [occluderWidth, 1.0, occluderDepth]),
+            let occlusionCube = ModelEntity(
+                mesh: .generateBox(size: [cubeWidthWorld, cubeHeightWorld, cubeDepthWorld]),
                 materials: [occlusionMat]
             )
-            bottomMask.name = bottomMaskName
-            // initial mask height (clamped to at least occluderThickness to avoid zero)
-            let initialBottomMaskHeight = max(sliceHeightBottom * modelHeightWorld, occluderThickness)
-            let bottomMaskCenterY = modelBaseWorldY + (initialBottomMaskHeight / 2.0)
-            bottomMask.position = [modelWorldPosition.x, bottomMaskCenterY, occluderZ]
-            bottomMask.scale = SIMD3<Float>(1.0, initialBottomMaskHeight, 1.0)
-            content.add(bottomMask)
+            occlusionCube.name = cubeOccluderName
+            occlusionCube.position = [modelWorldPosition.x, modelBaseWorldY + (cubeCenter * modelHeightWorld), occluderZ]
+            content.add(occlusionCube)
 
-            // Top mask: hides everything from top slice plane up to model top
-            let topMask = ModelEntity(
-                mesh: .generateBox(size: [occluderWidth, 1.0, occluderDepth]),
-                materials: [occlusionMat]
-            )
-            topMask.name = topMaskName
-            let modelTopY = modelBaseWorldY + modelHeightWorld
-            let initialTopMaskHeight = max((1.0 - sliceHeightTop) * modelHeightWorld, occluderThickness)
-            let topMaskCenterY = (modelBaseWorldY + (sliceHeightTop * modelHeightWorld)) + (initialTopMaskHeight / 2.0)
-            topMask.position = [modelWorldPosition.x, topMaskCenterY, occluderZ]
-            topMask.scale = SIMD3<Float>(1.0, initialTopMaskHeight, 1.0)
-            content.add(topMask)
-
-        } update: { content in
-            // --- Update Loop ---
-            // Find the occluders
-            guard let bottomOccluder = content.entities.first(where: { $0.name == bottomOccluderName }),
-                  let topOccluder = content.entities.first(where: { $0.name == topOccluderName }),
-                  let bottomMask = content.entities.first(where: { $0.name == bottomMaskName }) as? ModelEntity,
-                  let topMask = content.entities.first(where: { $0.name == topMaskName }) as? ModelEntity else {
+         } update: { content in
+            guard let occlusionCube = content.entities.first(where: { $0.name == cubeOccluderName }) as? ModelEntity else {
                 return
             }
-            
-            // Recalculate position for bottom/top occluders using the computed model base and world height
             let modelBaseWorldY = modelWorldPosition.y + (modelLocalMinY * modelWorldScale.y)
-            let bottomOccluderTargetY = modelBaseWorldY + (sliceHeightBottom * modelHeightWorld)
-            bottomOccluder.transform.translation = SIMD3<Float>(modelWorldPosition.x, bottomOccluderTargetY, occluderZ)
+            let cubeWidthWorld = max((modelLocalWidth * modelWorldScale.x) * cubeSize, occluderWidthFallback * 0.01)
+            let cubeDepthWorld = max((modelLocalDepth * modelWorldScale.z) * cubeSize, occluderDepthFallback * 0.01)
+            let cubeHeightWorld = max(modelHeightWorld * cubeSize, occluderThickness)
 
-            let topOccluderTargetY = modelBaseWorldY + (sliceHeightTop * modelHeightWorld)
-            topOccluder.transform.translation = SIMD3<Float>(modelWorldPosition.x, topOccluderTargetY, occluderZ)
-            
-            // Update invisible masks to hide outside regions
-            // Bottom mask: height = distance from model bottom to bottom slice
-            let bottomMaskHeight = max(sliceHeightBottom * modelHeightWorld, occluderThickness)
-            let bottomMaskCenterY = modelBaseWorldY + (bottomMaskHeight / 2.0)
-            bottomMask.transform.translation = SIMD3<Float>(modelWorldPosition.x, bottomMaskCenterY, occluderZ)
-            bottomMask.transform.scale = SIMD3<Float>(1.0, bottomMaskHeight, 1.0)
-
-            // Top mask: height = distance from top slice to model top
-            let modelTopY = modelBaseWorldY + modelHeightWorld
-            let topMaskHeight = max((modelTopY - topOccluderTargetY), occluderThickness)
-            let topMaskCenterY = topOccluderTargetY + (topMaskHeight / 2.0)
-            topMask.transform.translation = SIMD3<Float>(modelWorldPosition.x, topMaskCenterY, occluderZ)
-            topMask.transform.scale = SIMD3<Float>(1.0, topMaskHeight, 1.0)
+            let cubeCenterY = modelBaseWorldY + (cubeCenter * modelHeightWorld)
+            occlusionCube.transform.translation = SIMD3<Float>(modelWorldPosition.x, cubeCenterY, occluderZ)
+            if let mesh = occlusionCube.model?.mesh {
+                let bounds = mesh.bounds
+                let meshHeight = Float(bounds.max.y - bounds.min.y)
+                let yScale = meshHeight > 0 ? (cubeHeightWorld / meshHeight) : 1.0
+                let meshWidth = Float(bounds.max.x - bounds.min.x)
+                let meshDepth = Float(bounds.max.z - bounds.min.z)
+                let xScale = meshWidth > 0 ? (cubeWidthWorld / meshWidth) : 1.0
+                let zScale = meshDepth > 0 ? (cubeDepthWorld / meshDepth) : 1.0
+                occlusionCube.transform.scale = SIMD3<Float>(xScale, yScale, zScale)
+            } else {
+                occlusionCube.transform.scale = SIMD3<Float>(cubeWidthWorld / max(occluderWidthFallback * 0.01, 0.001), cubeHeightWorld / max(occluderThickness, 0.001), cubeDepthWorld / max(occluderDepthFallback * 0.01, 0.001))
+            }
          }
          .overlay(alignment: .bottom) {
-             VStack {
-                 // Bottom Slice Slider
-                 Slider(value: $sliceHeightBottom, in: 0.0...1.0, step: 0.01) { 
-                     Text("Bottom Slice")
-                 } minimumValueLabel: {
-                     Text("0%")
-                 } maximumValueLabel: {
-                     Text("100%")
+              VStack {
+                 VStack {
+                     Slider(value: $cubeCenter, in: 0.0...1.0, step: 0.01) {
+                         Text("Cube Center")
+                     } minimumValueLabel: { Text("0%") } maximumValueLabel: { Text("100%") }
+                     .frame(width: 400)
+                     Text("Center: \(cubeCenter * 100, specifier: "%.0f")%")
+                         .padding(8)
+                         .monospaced()
                  }
-                 .frame(width: 400)
-                 .onChange(of: sliceHeightBottom) { oldValue, newValue in
-                     if newValue >= sliceHeightTop { 
-                         sliceHeightBottom = sliceHeightTop - 0.001 
-                     }
-                     print("Bottom Slice Height changed to: \(newValue)")
-                 }
-                
-                 Text("Bottom Slice: \(sliceHeightBottom * 100, specifier: "%.0f")%")
-                     .padding(12)
-                     .monospaced()
 
-                 // Top Slice Slider
-                 Slider(value: $sliceHeightTop, in: 0.0...1.0, step: 0.01) { 
-                     Text("Top Slice")
-                 } minimumValueLabel: {
-                     Text("0%")
-                 } maximumValueLabel: {
-                     Text("100%")
-                 }
-                 .frame(width: 400)
-                 .onChange(of: sliceHeightTop) { oldValue, newValue in
-                     if newValue <= sliceHeightBottom { 
-                         sliceHeightTop = sliceHeightBottom + 0.001 
-                     }
-                     print("Top Slice Height changed to: \(newValue)")
+                 VStack {
+                     Slider(value: $cubeSize, in: 0.01...1.0, step: 0.01) {
+                         Text("Cube Size")
+                     } minimumValueLabel: { Text("1%") } maximumValueLabel: { Text("100%") }
+                     .frame(width: 400)
+                     Text("Size: \(cubeSize * 100, specifier: "%.0f")% of model height")
+                         .padding(8)
+                         .monospaced()
                  }
                 
-                 Text("Top Slice: \(sliceHeightTop * 100, specifier: "%.0f")%")
-                     .padding(12)
-                     .monospaced()
-                
-                 ToggleImmersiveSpaceButton()
-             }
-             .padding(24)
-             .background(.black) 
-             .cornerRadius(16)
-             .offset(z: -0.5)
-         }
-     }
- }
+                ToggleImmersiveSpaceButton()
+            }
+            .padding(24)
+            .background(.black) 
+            .cornerRadius(16)
+            .offset(z: -0.5)
+        }
+    }
+}
