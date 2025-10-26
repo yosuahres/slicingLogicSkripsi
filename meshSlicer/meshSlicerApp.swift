@@ -21,4 +21,4 @@ struct meshSlicerApp: App {
     }
 }
 
-let modelName = "CHARIS KRISNA MUKTI_ TN_Mandibula_001.usdz" 
+let modelName = "CHARIS KRISNA MUKTI_ TN_Mandibula_001.usdz"

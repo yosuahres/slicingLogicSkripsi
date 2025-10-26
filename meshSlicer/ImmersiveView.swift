@@ -5,6 +5,10 @@ struct ImmersiveView: View {
     @Environment(AppModel.self) private var appModel
     
     let modelName = "CHARIS KRISNA MUKTI_ TN_Mandibula_001"
+
+    @State private var modelEntityForGesture: ModelEntity? = nil
+    @State private var initialTransformForGesture: Transform? = nil
+    @State private var initialRotationForGesture: simd_quatf? = nil
     let modelWorldPosition: SIMD3<Float> = [0, 0.3, -0.2]
     let modelWorldScale: SIMD3<Float> = [0.01, 0.01, 0.01]
     
@@ -15,13 +19,16 @@ struct ImmersiveView: View {
     @State private var modelLocalMaxX: Float = 0.0
     @State private var modelLocalWidth: Float = 0.0
     @State private var modelLocalDepth: Float = 0.0
+    @State private var modelLocalMinZ: Float = 0.0 // New state for min Z
+    @State private var modelLocalMaxZ: Float = 0.0 // New state for max Z
 
     @State private var leftPlaneOffset: Float = 0.25
     @State private var rightPlaneOffset: Float = 0.75
     @State private var leftPlaneYPosition: Float = 0.0
     @State private var rightPlaneYPosition: Float = 0.0
+    @State private var leftPlaneZPosition: Float = -0.2 // New state for Z position
+    @State private var rightPlaneZPosition: Float = -0.2 // New state for Z position
     let occluderThickness: Float = 0.002
-    let occluderZ: Float = -0.2
     let cubeOccluderName = "SliceCubeOccluder"
 
     var body: some View {
@@ -40,6 +47,7 @@ struct ImmersiveView: View {
             model.position = modelWorldPosition
             model.scale = modelWorldScale
             model.name = "SlicableModel"
+            model.components.set(InputTargetComponent()) 
             content.add(model)
 
             let localBounds = model.visualBounds(relativeTo: model)
@@ -56,11 +64,18 @@ struct ImmersiveView: View {
                 modelLocalMaxX = localBounds.max.x
                 modelLocalWidth = localWidth
                 modelLocalDepth = localDepth
+                modelLocalMinZ = localBounds.min.z // New: Update min Z
+                modelLocalMaxZ = localBounds.max.z // New: Update max Z
                 modelHeightWorld = localHeight * modelWorldScale.y
+                
+                // Initialize Z positions based on model's initial Z
+                leftPlaneZPosition = modelWorldPosition.z + (localBounds.min.z * modelWorldScale.z) + (localDepth * modelWorldScale.z / 2.0)
+                rightPlaneZPosition = modelWorldPosition.z + (localBounds.min.z * modelWorldScale.z) + (localDepth * modelWorldScale.z / 2.0)
             }
 
             let modelBaseWorldY = modelWorldPosition.y + (localMinY * modelWorldScale.y)
             let modelBaseWorldX = modelWorldPosition.x + (localBounds.min.x * modelWorldScale.x)
+            let modelBaseWorldZ = modelWorldPosition.z + (localBounds.min.z * modelWorldScale.z) // New: Base Z for model
             let localHeightWorld = localHeight * modelWorldScale.y
             let localWidthWorld = localWidth * modelWorldScale.x
             let localDepthWorld = localDepth * modelWorldScale.z
@@ -91,7 +106,7 @@ struct ImmersiveView: View {
             leftPlane.position = [
                 modelBaseWorldX + (leftPlaneOffset * localWidthWorld),
                 leftPlaneYPosition,
-                occluderZ
+                leftPlaneZPosition // Use new Z position
             ]
             leftPlane.components.set(CollisionComponent(shapes: [.generateBox(width: planeThickness, height: planeHeight, depth: planeDepth)]))
             leftPlane.components.set(InputTargetComponent())
@@ -105,7 +120,7 @@ struct ImmersiveView: View {
             rightPlane.position = [
                 modelBaseWorldX + (rightPlaneOffset * localWidthWorld),
                 rightPlaneYPosition,
-                occluderZ
+                rightPlaneZPosition // Use new Z position
             ]
             rightPlane.components.set(CollisionComponent(shapes: [.generateBox(width: planeThickness, height: planeHeight, depth: planeDepth)]))
             rightPlane.components.set(InputTargetComponent())
@@ -122,8 +137,8 @@ struct ImmersiveView: View {
             followingCube.name = "FollowingCube"
             followingCube.position = [
                 modelBaseWorldX + ((leftPlaneOffset + rightPlaneOffset) / 2.0 * localWidthWorld),
-                modelBaseWorldY + (cubeInitHeight / 2.0),
-                occluderZ
+                (leftPlaneYPosition + rightPlaneYPosition) / 2.0,
+                (leftPlaneZPosition + rightPlaneZPosition) / 2.0 // Use average Z position
             ]
             content.add(followingCube)
 
@@ -141,13 +156,16 @@ struct ImmersiveView: View {
             let modelBaseWorldX = modelWorldPosition.x + (modelLocalMinX * modelWorldScale.x)
             let modelWidthWorld = modelLocalWidth * modelWorldScale.x
             let modelBaseWorldY = modelWorldPosition.y + (modelLocalMinY * modelWorldScale.y)
+            let modelBaseWorldZ = modelWorldPosition.z + (modelLocalMinZ * modelWorldScale.z) // New: Base Z for model
             let modelWorldHeight = modelHeightWorld
             let modelWorldDepth = modelLocalDepth * modelWorldScale.z
 
             leftPlane.transform.translation.x = modelBaseWorldX + (leftPlaneOffset * modelWidthWorld)
             leftPlane.transform.translation.y = leftPlaneYPosition
+            leftPlane.transform.translation.z = leftPlaneZPosition // Update Z position
             rightPlane.transform.translation.x = modelBaseWorldX + (rightPlaneOffset * modelWidthWorld)
             rightPlane.transform.translation.y = rightPlaneYPosition
+            rightPlane.transform.translation.z = rightPlaneZPosition // Update Z position
 
             let cubeMinX = min(leftPlane.transform.translation.x, rightPlane.transform.translation.x)
             let cubeMaxX = max(leftPlane.transform.translation.x, rightPlane.transform.translation.x)
@@ -159,13 +177,17 @@ struct ImmersiveView: View {
 
             followingCube.transform.translation = SIMD3<Float>(
                 cubeCenterX,
-                modelBaseWorldY + (cubeHeight / 2.0),
-                occluderZ
+                (leftPlaneYPosition + rightPlaneYPosition) / 2.0,
+                (leftPlaneZPosition + rightPlaneZPosition) / 2.0 // Update Z position
             )
             
             followingCube.model?.mesh = .generateBox(size: [cubeWidth, cubeHeight, cubeDepth])
             
         }
+        .gesture(
+            Gestures.dragGesture(modelEntity: $modelEntityForGesture, initialTransform: $initialTransformForGesture)
+                .exclusively(before: Gestures.rotationGesture(modelEntity: $modelEntityForGesture, initialRotation: $initialRotationForGesture))
+        )
         .gesture(
             DragGesture(minimumDistance: 0.0, coordinateSpace: .global)
                 .targetedToAnyEntity()
@@ -174,10 +196,12 @@ struct ImmersiveView: View {
                     let translation = value.translation3D
                     let deltaX = Float(translation.x)
                     let deltaY = Float(translation.y)
+                    let deltaZ = Float(translation.z) // New: Get deltaZ
 
                     let modelWidthWorld = modelLocalWidth * modelWorldScale.x
                     let modelHeightWorld = modelHeightWorld 
-                    guard modelWidthWorld > 0, modelHeightWorld > 0 else {
+                    let modelDepthWorld = modelLocalDepth * modelWorldScale.z // New: Model world depth
+                    guard modelWidthWorld > 0, modelHeightWorld > 0, modelDepthWorld > 0 else { // New: Guard modelDepthWorld
                         return
                     }
 
@@ -191,6 +215,13 @@ struct ImmersiveView: View {
                     let minYClamp = modelBaseWorldY + (planeVisualHeight / 2.0)
                     let maxYClamp = modelBaseWorldY + modelHeightWorld - (planeVisualHeight / 2.0)
 
+                    // New: Z-axis clamping
+                    let modelBaseWorldZ = modelWorldPosition.z + (modelLocalMinZ * modelWorldScale.z)
+                    let planeVisualDepth = (modelLocalMaxZ - modelLocalMinZ) * modelWorldScale.z * 1.2
+                    let minZClamp = modelBaseWorldZ + (planeVisualDepth / 2.0)
+                    let maxZClamp = modelBaseWorldZ + modelDepthWorld - (planeVisualDepth / 2.0)
+
+
                     if entity.name == "LeftPlane" {
                         var newLeftPlaneX = currentLeftPlaneX + deltaX
                         let minLeftX = modelBaseWorldX
@@ -202,6 +233,10 @@ struct ImmersiveView: View {
                         newLeftPlaneY = max(min(newLeftPlaneY, maxYClamp), minYClamp)
                         leftPlaneYPosition = newLeftPlaneY
                         
+                        var newLeftPlaneZ = leftPlaneZPosition + deltaZ // New: Update Z position
+                        newLeftPlaneZ = max(min(newLeftPlaneZ, maxZClamp), minZClamp) // New: Clamp Z position
+                        leftPlaneZPosition = newLeftPlaneZ // New: Assign Z position
+                        
                     } else if entity.name == "RightPlane" {
                         var newRightPlaneX = currentRightPlaneX + deltaX
                         let minRightX = currentLeftPlaneX + occluderThickness
@@ -212,6 +247,10 @@ struct ImmersiveView: View {
                         var newRightPlaneY = rightPlaneYPosition + deltaY
                         newRightPlaneY = max(min(newRightPlaneY, maxYClamp), minYClamp)
                         rightPlaneYPosition = newRightPlaneY
+
+                        var newRightPlaneZ = rightPlaneZPosition + deltaZ // New: Update Z position
+                        newRightPlaneZ = max(min(newRightPlaneZ, maxZClamp), minZClamp) // New: Clamp Z position
+                        rightPlaneZPosition = newRightPlaneZ // New: Assign Z position
                     }
                 }
         )
